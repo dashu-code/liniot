@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "liniot"
+version = "0.1.0"
+description = "LinIoT — 轻量级 AIoT 开源平台：MQTT/HTTP 设备接入、规则引擎、实时仪表盘与 LLM 智能助手"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "LinIoT Contributors" }]
+keywords = ["iot", "aiot", "mqtt", "llm", "smart-home", "dashboard", "timeseries"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet of Things",
+]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "paho-mqtt>=2.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+liniot = "liniot.cli:main"
+
+[tool.setuptools]
+packages = ["liniot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
