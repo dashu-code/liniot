@@ -1,0 +1,97 @@
+"""AI 助手测试：本地回退意图识别、JSON 解析、LLM 路径（mock）。"""
+from __future__ import annotations
+
+import pytest
+
+from liniot.ai import extract_json, local_intent
+from liniot.bus import EventBus
+from liniot.config import AIConfig
+from liniot.rules import RuleEngine
+from liniot.service import DeviceService
+from liniot.store import Store
+
+SNAPSHOT = [
+    {"id": "sensor-1", "name": "客厅传感器", "type": "sensor", "online": True,
+     "properties": {}, "metrics": {"temperature": {"value": 25.3, "ts": 1.0},
+                                   "humidity": {"value": 60.0, "ts": 1.0}}},
+    {"id": "light-1", "name": "智能灯", "type": "light", "online": True,
+     "properties": {"power": False}, "metrics": {}},
+]
+
+
+@pytest.fixture()
+def service(tmp_path):
+    store = Store(tmp_path / "ai.db")
+    svc = DeviceService(store, EventBus(), RuleEngine(store, EventBus()))
+    svc.register("客厅传感器", "sensor", device_id="sensor-1")
+    svc.register("智能灯", "light", device_id="light-1")
+    svc.set_status("light-1", "online", {"power": False})
+    return svc
+
+
+def test_extract_json_tolerant():
+    assert extract_json('废话 {"reply":"好","actions":[]} 结尾') == {"reply": "好", "actions": []}
+    assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert extract_json("完全没有 JSON") is None
+    assert extract_json('前缀 {"a":{"b":1}} 尾部 {"c":2}') == {"a": {"b": 1}}
+
+
+def test_local_intent_query_temperature():
+    reply, actions = local_intent("客厅传感器温度是多少", SNAPSHOT)
+    assert "25.3" in reply
+    assert actions == []
+
+
+def test_local_intent_turn_on_light(service):
+    reply, actions = local_intent("打开智能灯", SNAPSHOT)
+    assert actions == [{"tool": "set_property", "device": "light-1",
+                        "property": "power", "value": True}]
+    assert "智能灯" in reply
+
+
+def test_local_intent_overview():
+    reply, _ = local_intent("设备概览", SNAPSHOT)
+    assert "客厅传感器" in reply and "智能灯" in reply
+
+
+@pytest.mark.anyio()
+async def test_chat_llm_mode_executes_validated_action(service, monkeypatch):
+    from liniot import ai
+
+    async def fake_llm(config, messages):
+        return ('{"reply":"好的，已为您打开智能灯。",'
+                '"actions":[{"tool":"set_property","device":"light-1",'
+                '"property":"power","value":true}]}')
+
+    monkeypatch.setattr(ai, "call_llm", fake_llm)
+    result = await ai.chat(service.store, service, AIConfig(api_key="test-key"),
+                           "把灯打开")
+    assert result["mode"] == "llm"
+    assert result["actions"] == [{"tool": "set_property", "device": "light-1",
+                                  "property": "power", "value": True}]
+    # 命令真实落库，可被设备拉取
+    pending = service.poll_commands("light-1")
+    assert pending[0]["payload"] == {"property": "power", "value": True}
+
+
+@pytest.mark.anyio()
+async def test_chat_llm_rejects_unknown_property(service, monkeypatch):
+    from liniot import ai
+
+    async def fake_llm(config, messages):
+        return ('{"reply":"尝试执行。","actions":[{"tool":"set_property",'
+                '"device":"light-1","property":"volume","value":99}]}')
+
+    monkeypatch.setattr(ai, "call_llm", fake_llm)
+    result = await ai.chat(service.store, service, AIConfig(api_key="k"), "调大音量")
+    assert result["actions"] == []
+    assert any(not r["ok"] for r in result["results"])
+
+
+@pytest.mark.anyio()
+async def test_chat_without_key_uses_local_mode(service):
+    from liniot import ai
+
+    result = await ai.chat(service.store, service, AIConfig(), "关闭智能灯")
+    assert result["mode"] == "local"
+    assert service.poll_commands("light-1")[0]["payload"]["value"] is False
