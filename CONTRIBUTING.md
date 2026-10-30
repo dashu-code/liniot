@@ -30,6 +30,23 @@ liniot run & liniot simulate
 - 新功能必须带测试；修复必须带能复现原 bug 的回归测试。
 - 涉及协议/API 变更时同步更新 `docs/api.md` / `docs/mqtt-protocol.md`。
 
+## 认领与协作流程
+
+1. 在 [ROADMAP](ROADMAP.md) 或 Issue 列表挑任务（`good first issue` 标签适合上手）；
+2. 在 Issue 下评论认领，避免重复劳动；维护者会把 Issue 指派给你；
+3. 从最新 `main` 切分支开发：`git checkout -b feat/xxx`；
+4. 提交 PR（模板会引导自查），CI 通过后 48 小时内会有评审回复；
+5. 评审意见以代码为准讨论，合并后你的 GitHub 头像会出现在贡献者列表。
+
+标签约定：`bug` / `enhancement` / `good first issue` / `help wanted` /
+`documentation` / `wontfix`。
+
+## 发布流程
+
+- 遵循语义化版本：`major.minor.patch`；
+- 每次发布：更新 `CHANGELOG.md` → 打 `vX.Y.Z` tag → GitHub Release 附变更说明；
+- 破坏性变更提前一个版本在 Issue 公示讨论。
+
 ## 测试清单
 
 - `pytest -v`：存储、规则、服务、API、MQTT 解析、AI、事件总线、模拟器共 40+ 用例。

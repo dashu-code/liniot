@@ -67,9 +67,9 @@ bash examples/curl-demo.sh   # 纯 API 演示：注册→上报→规则→告�
 
 ## 仪表盘
 
-| 概览 | AI 助手 | 规则与告警 |
+| 概览 | 设备管理 | AI 助手 |
 |---|---|---|
-| ![](docs/images/dashboard.png) | ![](docs/images/ai-assistant.png) | ![](docs/images/rules-alerts.png) |
+| ![](docs/images/dashboard.png) | ![](docs/images/devices.png) | ![](docs/images/ai-assistant.png) |
 
 - **概览**：设备在线数、数据点、告警统计 + 每设备每指标实时曲线（WebSocket 推送）
 - **设备管理**：注册 / 删除设备，进入详情后可切换布尔属性（如灯开关）、下发烧写数值属性
@@ -125,14 +125,15 @@ docker compose up -d    # 同时启动 mosquitto + liniot，MQTT 通道自动接
 
 ## Roadmap
 
-- [ ] 多用户与 API Token 鉴权
-- [ ] 数据导出（CSV / Parquet）
-- [ ] 规则支持连续 N 次判定与组合条件
-- [ ] Modbus / BLE 接入适配器
+见 [ROADMAP.md](ROADMAP.md)——其中标注 *good first issue* 的任务适合首次贡献。
 
-## 贡献
+## 参与贡献
 
-Issue / PR 均欢迎，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+欢迎任何人参与，Issue / PR 均可：
+
+- **想上手写代码**：从 [ROADMAP](ROADMAP.md) 挑一个 *good first issue*，按 [CONTRIBUTING](CONTRIBUTING.md) 的流程提交 PR；
+- **想提需求/报 Bug**：使用 [Issue 模板](.github/ISSUE_TEMPLATE)；
+- 所有参与者请遵守[行为准则](CODE_OF_CONDUCT.md)。
 
 ## License
 

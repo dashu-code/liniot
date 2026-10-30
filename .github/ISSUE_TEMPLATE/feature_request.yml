@@ -1,0 +1,31 @@
+name: 功能建议
+description: 提出新功能或改进建议
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 想解决什么问题？在什么场景下需要？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 期望的行为 / API 形态 / 界面草图都可以。
+    validations:
+      required: true
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: 参与意向
+      options:
+        - label: 我愿意提交 PR 实现这个功能（维护者会协助评审）
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 检查清单
+      options:
+        - label: 已查阅 [ROADMAP](../blob/main/ROADMAP.md) 确认未与既有规划重复
+          required: true
