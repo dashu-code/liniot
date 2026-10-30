@@ -49,12 +49,25 @@ function ago(ts) {
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 const METRIC_STYLE = {
-  temperature: { color: "#f97316", unit: "°C", label: "温度" },
-  humidity: { color: "#3b82f6", unit: "%", label: "湿度" },
-  co2: { color: "#a78bfa", unit: "ppm", label: "CO₂" },
-  pm25: { color: "#f472b6", unit: "μg/m³", label: "PM2.5" },
+  temperature: { color: "#f59e0b", unit: "°C", label: "温度" },
+  humidity: { color: "#2f7bf6", unit: "%", label: "湿度" },
+  co2: { color: "#8b5cf6", unit: "ppm", label: "CO₂" },
+  pm25: { color: "#ec4899", unit: "μg/m³", label: "PM2.5" },
 };
-const metricStyle = (m) => METRIC_STYLE[m] || { color: "#2dd4bf", unit: "", label: m };
+const metricStyle = (m) => METRIC_STYLE[m] || { color: "#14b8a6", unit: "", label: m };
+
+/* 设备类型扁平图标（浅色卡片风格） */
+const DEVICE_ICON = {
+  sensor: { fill: "#34b3a0", glyph: '<path d="M7 12.5V9.8a3.4 3.4 0 1 1 4 0v2.7l-1 1.4H8l-1-1.4z" fill="#fff"/>' },
+  light: { fill: "#f5a623", glyph: '<path d="M10 4.5A3.5 3.5 0 0 0 6.5 8c0 1.2.6 2.2 1.5 2.8v1.7h4V10.8c.9-.6 1.5-1.6 1.5-2.8A3.5 3.5 0 0 0 10 4.5z" fill="#fff"/><rect x="8" y="13.5" width="4" height="1.4" rx=".7" fill="#fff" opacity=".85"/>' },
+  switch: { fill: "#2f7bf6", glyph: '<rect x="4.5" y="8" width="11" height="5" rx="2.5" fill="#fff"/><circle cx="7" cy="10.5" r="1.5" fill="#2f7bf6"/>' },
+  generic: { fill: "#7b8aa5", glyph: '<rect x="6" y="6" width="8" height="8" rx="1.5" fill="#fff"/><path d="M8 8.5h4M8 10.5h4" stroke="#7b8aa5" stroke-width="1.1" stroke-linecap="round"/>' },
+};
+function deviceIcon(type, size = 24) {
+  const icon = DEVICE_ICON[type] || DEVICE_ICON.generic;
+  return `<svg class="dev-icon" width="${size}" height="${size}" viewBox="0 0 20 20" aria-hidden="true">` +
+         `<rect width="20" height="20" rx="6" fill="${icon.fill}"/>${icon.glyph}</svg>`;
+}
 
 /* ------------------------------------------------------------------ 图表 */
 function drawChart(canvas, points, color) {
@@ -65,7 +78,7 @@ function drawChart(canvas, points, color) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
   if (!points || points.length < 2) {
-    ctx.fillStyle = "#8b949e"; ctx.font = "12px sans-serif";
+    ctx.fillStyle = "#8a99b5"; ctx.font = "12px sans-serif";
     ctx.fillText("等待数据…", w / 2 - 30, h / 2);
     return;
   }
@@ -79,7 +92,7 @@ function drawChart(canvas, points, color) {
   const x = (i) => padL + (iw * i) / (points.length - 1);
   const y = (v) => padT + ih - ((v - min) * ih) / (max - min);
 
-  ctx.strokeStyle = "#21262d"; ctx.fillStyle = "#8b949e"; ctx.font = "10px ui-monospace, Menlo";
+  ctx.strokeStyle = "#e8eef7"; ctx.fillStyle = "#8a99b5"; ctx.font = "10px ui-monospace, Menlo";
   ctx.textAlign = "right";
   for (let g = 0; g <= 3; g++) {
     const gy = padT + (ih * g) / 3;
@@ -97,7 +110,7 @@ function drawChart(canvas, points, color) {
   ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
   ctx.lineTo(x(points.length - 1), padT + ih); ctx.lineTo(x(0), padT + ih); ctx.closePath();
   const grad = ctx.createLinearGradient(0, padT, 0, padT + ih);
-  grad.addColorStop(0, color + "33"); grad.addColorStop(1, color + "00");
+  grad.addColorStop(0, color + "3d"); grad.addColorStop(1, color + "00");
   ctx.fillStyle = grad; ctx.fill();
 
   const last = points[points.length - 1];
@@ -187,7 +200,7 @@ async function viewOverview(view) {
     Object.entries(dev.metrics).map(([metric, points]) => `
       <div class="card chart-card" data-chart="${esc(deviceId)}:${esc(metric)}">
         <div class="chart-card-head">
-          <div class="chart-title">${esc(dev.name)} · ${metricStyle(metric).label}</div>
+          <div class="chart-title">${deviceIcon(dev.type, 20)} ${esc(dev.name)} · ${metricStyle(metric).label}</div>
           <div><span class="chart-latest" style="color:${metricStyle(metric).color}">
             ${points.length ? points[points.length - 1].value : "--"}</span>
             <span class="chart-unit">${metricStyle(metric).unit}</span></div>
@@ -196,8 +209,8 @@ async function viewOverview(view) {
       </div>`)).join("");
 
   view.innerHTML = `
-    <div class="page-title">概览</div>
-    <div class="page-sub">设备、数据与告警的实时总览（WebSocket 推送，无需刷新）</div>
+    <div class="page-title">设备可视化</div>
+    <div class="page-sub">EQUIPMENT VISUALIZATION · 设备、数据与告警的实时总览（WebSocket 推送，无需刷新）</div>
     <div class="stat-grid">${cards.map(([label, value, extra]) => `
       <div class="card"><div class="stat-label">${label}</div>
       <div class="stat-value">${value}</div><div class="stat-extra">${extra}</div></div>`).join("")}
@@ -229,7 +242,7 @@ async function viewDevices(view) {
   const rows = S.devices.map((d) => `
     <tr class="row-link" data-open="${esc(d.id)}">
       <td class="mono">${esc(d.id)}</td>
-      <td>${esc(d.name)}</td>
+      <td>${deviceIcon(d.type)} ${esc(d.name)}</td>
       <td><span class="pill type">${esc(d.type)}</span></td>
       <td><span class="pill ${d.online ? "online" : "offline"}">${d.online ? "在线" : "离线"}</span></td>
       <td class="mono">${d.last_seen ? ago(d.last_seen) : "—"}</td>
@@ -306,7 +319,7 @@ async function viewDevice(view) {
 
   view.innerHTML = `
     <a class="back-link" href="#/devices">← 返回设备列表</a>
-    <div class="page-title" style="margin-top:10px">${esc(device.name)}
+    <div class="page-title" style="margin-top:10px">${deviceIcon(device.type, 26)} ${esc(device.name)}
       <span class="pill type">${esc(device.type)}</span>
       <span class="pill ${device.online ? "online" : "offline"}">${device.online ? "在线" : "离线"}</span>
     </div>
