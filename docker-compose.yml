@@ -1,0 +1,26 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  liniot:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      LINIOT_MQTT_HOST: mosquitto
+      LINIOT_MQTT_PORT: "1883"
+      # LINIOT_AI_API_KEY: sk-xxx        # 可选：启用大模型助手
+      # LINIOT_AI_BASE_URL: https://api.openai.com/v1
+      # LINIOT_AI_MODEL: gpt-4o-mini
+      # LINIOT_WEBHOOK_URL: http://host.docker.internal:9000/alert  # 可选：告警回调
+    volumes:
+      - liniot-data:/data
+    depends_on:
+      - mosquitto
+
+volumes:
+  liniot-data:
