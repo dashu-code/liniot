@@ -1,0 +1,172 @@
+"""REST + WebSocket API 路由。"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect
+
+from . import ai
+from .config import Config
+from .schemas import (ChatIn, DeviceIn, PropertiesIn, RuleIn, RulePatch,
+                      StatusIn, TelemetryIn)
+from .service import DeviceService, UnknownDevice
+
+logger = logging.getLogger("liniot.api")
+
+
+def build_router(store, bus, rules, devices: DeviceService, config: Config) -> APIRouter:
+    router = APIRouter(prefix="/api")
+
+    def device_or_404(device_id: str) -> dict[str, Any]:
+        device = store.get_device(device_id)
+        if device is None:
+            raise HTTPException(404, f"设备不存在: {device_id}")
+        return device
+
+    # ------------------------------------------------------------------ 基础
+
+    @router.get("/health")
+    def health() -> dict[str, Any]:
+        return {"status": "ok", "mqtt": config.mqtt.enabled, "ai": config.ai.enabled}
+
+    @router.get("/overview")
+    def overview() -> dict[str, Any]:
+        return devices.overview()
+
+    @router.get("/overview/series")
+    def overview_series(limit: int = 120) -> dict[str, Any]:
+        """概览页所有设备的近期曲线（单次请求，供仪表盘轮询/推送刷新）。"""
+        result: dict[str, Any] = {}
+        for device in store.list_devices():
+            entry = {"name": device["name"], "type": device["type"],
+                     "online": devices.view(device)["online"], "metrics": {}}
+            for metric in store.metrics_of(device["id"]):
+                entry["metrics"][metric] = store.query_telemetry(device["id"], metric, limit)
+            result[device["id"]] = entry
+        return result
+
+    # ------------------------------------------------------------------ 设备
+
+    @router.get("/devices")
+    def list_devices() -> list[dict[str, Any]]:
+        return [devices.view(d) for d in store.list_devices()]
+
+    @router.post("/devices")
+    def create_device(body: DeviceIn, response: Response) -> dict[str, Any]:
+        # 幂等：同 id 重复注册时更新名称/类型/元数据，方便设备重启后重新注册
+        device, created = devices.register(body.name, body.type, body.id, body.meta)
+        response.status_code = 201 if created else 200
+        return {"device": devices.view(device), "created": created}
+
+    @router.get("/devices/{device_id}")
+    def get_device(device_id: str) -> dict[str, Any]:
+        return devices.view(device_or_404(device_id))
+
+    @router.delete("/devices/{device_id}")
+    def delete_device(device_id: str) -> dict[str, Any]:
+        device_or_404(device_id)
+        devices.delete(device_id)
+        return {"deleted": device_id}
+
+    @router.get("/devices/{device_id}/telemetry")
+    def get_telemetry(device_id: str, metric: str | None = None,
+                      limit: int = 200) -> list[dict[str, Any]]:
+        device_or_404(device_id)
+        return store.query_telemetry(device_id, metric, max(1, min(limit, 2000)))
+
+    @router.post("/devices/{device_id}/telemetry")
+    def post_telemetry(device_id: str, body: TelemetryIn) -> dict[str, Any]:
+        device_or_404(device_id)
+        if body.points is not None:
+            points = [p.model_dump() for p in body.points]
+        elif body.metric is not None and body.value is not None:
+            points = [{"metric": body.metric, "value": body.value, "ts": body.ts}]
+        else:
+            raise HTTPException(422, "需要 points 字段或 metric/value 单点字段")
+        try:
+            count = devices.ingest(device_id, points, source="http")
+        except UnknownDevice:
+            raise HTTPException(404, f"设备不存在: {device_id}")
+        return {"accepted": count}
+
+    @router.post("/devices/{device_id}/status")
+    def post_status(device_id: str, body: StatusIn) -> dict[str, Any]:
+        try:
+            return devices.view(devices.set_status(device_id, body.status, body.properties))
+        except UnknownDevice:
+            raise HTTPException(404, f"设备不存在: {device_id}")
+
+    @router.post("/devices/{device_id}/properties")
+    def post_properties(device_id: str, body: PropertiesIn) -> dict[str, Any]:
+        try:
+            commands = devices.set_properties(device_id, body.properties)
+        except UnknownDevice:
+            raise HTTPException(404, f"设备不存在: {device_id}")
+        return {"queued": commands}
+
+    @router.get("/devices/{device_id}/commands")
+    def get_commands(device_id: str) -> list[dict[str, Any]]:
+        device_or_404(device_id)
+        return devices.poll_commands(device_id)
+
+    # ------------------------------------------------------------------ 规则
+
+    @router.get("/rules")
+    def list_rules() -> list[dict[str, Any]]:
+        return store.list_rules()
+
+    @router.post("/rules", status_code=201)
+    def create_rule(body: RuleIn) -> dict[str, Any]:
+        if body.device_id is not None:
+            device_or_404(body.device_id)
+        return store.create_rule(body.device_id, body.metric, body.op,
+                                 body.threshold, body.note, body.enabled)
+
+    @router.patch("/rules/{rule_id}")
+    def patch_rule(rule_id: int, body: RulePatch) -> dict[str, Any]:
+        rule = store.update_rule(rule_id, enabled=body.enabled, note=body.note,
+                                 threshold=body.threshold)
+        if rule is None:
+            raise HTTPException(404, f"规则不存在: {rule_id}")
+        return rule
+
+    @router.delete("/rules/{rule_id}")
+    def delete_rule(rule_id: int) -> dict[str, Any]:
+        store.delete_rule(rule_id)
+        return {"deleted": rule_id}
+
+    @router.get("/alerts")
+    def list_alerts(limit: int = 50) -> list[dict[str, Any]]:
+        return store.list_alerts(max(1, min(limit, 500)))
+
+    # ------------------------------------------------------------------ AI
+
+    @router.post("/ai/chat")
+    async def ai_chat(body: ChatIn) -> dict[str, Any]:
+        return await ai.chat(store, devices, config.ai, body.message, body.history)
+
+    return router
+
+
+def register_websocket(app, store, bus, devices: DeviceService) -> None:
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        queue = bus.subscribe()
+        try:
+            hello = {"type": "hello",
+                     "data": {"devices": [devices.view(d) for d in store.list_devices()],
+                              "overview": devices.overview()}}
+            await websocket.send_text(json.dumps(hello, ensure_ascii=False))
+            while True:
+                message = await queue.get()
+                await websocket.send_text(json.dumps(message, ensure_ascii=False))
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            logger.debug("WebSocket 连接异常退出: %s", exc)
+        finally:
+            bus.unsubscribe(queue)
