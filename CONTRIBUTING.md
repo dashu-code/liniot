@@ -5,7 +5,7 @@
 ## 开发环境
 
 ```bash
-git clone https://github.com/OWNER/liniot.git && cd liniot
+git clone https://github.com/kevin1779/liniot.git && cd liniot
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest -v           # 全部通过后再提交

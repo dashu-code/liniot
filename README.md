@@ -10,7 +10,7 @@
 
 | | |
 |---|---|
-| CI | [![CI](https://github.com/OWNER/liniot/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/liniot/actions/workflows/ci.yml) |
+| CI | [![CI](https://github.com/kevin1779/liniot/actions/workflows/ci.yml/badge.svg)](https://github.com/kevin1779/liniot/actions/workflows/ci.yml) |
 | 测试 | 40 个用例（存储 / 规则 / API / MQTT / AI / 总线 / 模拟器） |
 | 依赖 | FastAPI + SQLite + paho-mqtt，前端零构建 |
 | 协议 | MIT |
@@ -58,7 +58,7 @@ liniot run
 ## 30 秒体验（不装任何东西）
 
 ```bash
-git clone https://github.com/OWNER/liniot.git && cd liniot
+git clone https://github.com/kevin1779/liniot.git && cd liniot
 pip install -e .
 liniot run &            # 平台
 liniot simulate &       # 虚拟设备
