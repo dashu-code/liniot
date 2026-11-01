@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | CI | [![CI](https://github.com/kevin1779/liniot/actions/workflows/ci.yml/badge.svg)](https://github.com/kevin1779/liniot/actions/workflows/ci.yml) |
-| 测试 | 40 个用例（存储 / 规则 / API / MQTT / AI / 总线 / 模拟器） |
+| 测试 | 57 个用例（存储 / 规则 / 异常检测 / 场景 / API / MQTT / AI / 总线 / 模拟器） |
 | 依赖 | FastAPI + SQLite + paho-mqtt，前端零构建 |
 | 协议 | MIT |
 
@@ -20,8 +20,10 @@
 - **设备接入**：MQTT（对接任意标准 Broker，支持遗嘱下线检测）与 HTTP 双通道，语义一致
 - **时序存储**：SQLite 单文件存储，WAL 并发，按设备环形保留，自动清理
 - **规则引擎**：阈值规则（6 种比较符），上升沿触发一次告警，按「规则 × 设备」独立判定，支持全局规则与 Webhook 通知
-- **实时仪表盘**：原生 JS 零构建，WebSocket 推送（断线自动降级轮询），实时曲线、属性控制、规则管理、告警中心
-- **AI 助手**：自然语言查设备 / 下控制命令；兼容任意 OpenAI 风格 API（OpenAI / DeepSeek / Ollama / vLLM…），未配 Key 自动降级本地规则模式；AI 动作白名单校验 + 全量落库审计
+- **统计异常检测**：EWMA 基线 + 3σ 判定，无需配置规则即可发现指标突变
+- **场景联动**：「温度 > 28 则开灯」式自动化，冷却窗口防止命令震荡
+- **实时仪表盘**：原生 JS 零构建，WebSocket 推送（断线自动降级轮询），实时曲线、属性控制、规则/场景管理、告警中心
+- **AI 助手**：自然语言查设备 / 下控制命令；兼容任意 OpenAI 风格 API（OpenAI / DeepSeek / Ollama / vLLM…），未配 Key 自动降级本地规则模式；**告警自动生成 LLM 诊断**（原因分析 + 处置建议）；AI 动作白名单校验 + 全量落库审计
 - **设备模拟器**：无需任何硬件，3 条命令跑通全流程；附 ESP32 固件示例
 
 ## 快速开始
@@ -114,7 +116,7 @@ bash examples/curl-demo.sh   # 纯 API 演示：注册→上报→规则→告�
 
 ```bash
 pip install -e ".[dev]"
-pytest -v          # 40 passed
+pytest -v          # 57 passed
 ```
 
 ## Docker
@@ -157,7 +159,9 @@ A lightweight open-source AIoT platform: device connectivity over MQTT/HTTP, tim
 - **Storage** — single-file SQLite with WAL concurrency and per-device ring retention
 - **Rules** — threshold rules with rising-edge deduplication (per rule × device), global rules, webhook notifications
 - **Dashboard** — zero-build vanilla JS, WebSocket push with polling fallback, live charts, property control, rule management, alert center
-- **AI assistant** — natural-language device queries and control; works with any OpenAI-compatible API (OpenAI / DeepSeek / Ollama / vLLM…); falls back to a local rule-based intent engine without a key; AI actions are whitelisted and fully audited
+- **AI assistant** — natural-language device queries and control; works with any OpenAI-compatible API (OpenAI / DeepSeek / Ollama / vLLM…); **alerts get automatic LLM diagnosis** (root cause + suggested action); falls back to a local rule-based intent engine without a key; AI actions are whitelisted and fully audited
+- **Anomaly detection** — EWMA baseline with 3σ decision, catches metric spikes without any rule configuration
+- **Scene automation** — "when temperature > 28 then turn on the light" with cooldown anti-oscillation
 - **Simulator** — full end-to-end demo without any hardware; ESP32 firmware examples included
 
 ## Quick start

@@ -49,7 +49,7 @@ liniot run & liniot simulate
 
 ## 测试清单
 
-- `pytest -v`：存储、规则、服务、API、MQTT 解析、AI、事件总线、模拟器共 40+ 用例。
+- `pytest -v`：存储、规则、服务、API、MQTT 解析、AI、事件总线、模拟器、异常检测、场景联动共 57 用例。
 - 手动冒烟：`liniot run` + `liniot simulate` 后检查概览曲线、灯开关闭环、AI 对话。
 
 ## 报告 Issue

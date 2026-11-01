@@ -84,6 +84,17 @@ System Prompt 全文见 `liniot/ai.py` 的 `SYSTEM_PROMPT`；模型温度 0.2 �
 | 「设备概览」「所有设备状态」 | 列出每台设备的属性与最新指标 |
 | 「你能做什么」 | 返回能力说明 |
 
+## 告警智能诊断
+
+配置 LLM Key 后，每条告警（阈值规则触发或异常检测触发）都会由后台协程
+`diagnosis_worker` 异步生成诊断：把该设备的实时快照与告警内容交给模型，
+要求不超过三句中文给出「可能原因 + 处置建议」，回写 `alerts.diagnosis`
+并通过 WebSocket `alert_diagnosis` 事件推送到仪表盘。
+
+- 异步执行，不阻塞数据面；失败静默降级（告警本身不受影响）
+- `LINIOT_AI_DIAGNOSIS=off` 可整体关闭
+- 未配置 Key 时 `diagnosis` 保持 `null`，界面不展示诊断栏
+
 ## 测试
 
 LLM 路径在测试中 mock（`tests/test_ai.py`），覆盖：结构化输出解析、

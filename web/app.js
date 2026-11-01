@@ -160,7 +160,14 @@ function handleEvent(msg) {
   } else if (type === "alert") {
     S.alerts.unshift(data);
     toast(`新告警：${data.message}`);
-    if (S.route === "overview") refreshCurrent();
+    if (["overview", "rules"].includes(S.route)) refreshCurrent();
+  } else if (type === "alert_diagnosis") {
+    const alert = S.alerts.find((a) => a.id === data.id);
+    if (alert) alert.diagnosis = data.diagnosis;
+    if (["overview", "rules"].includes(S.route)) refreshCurrent();
+  } else if (type === "scene_fired") {
+    toast(`场景「${data.name}」已执行：${data.action_device_id}.${data.action_property}`);
+    if (S.route === "scenes") refreshCurrent();
   }
 }
 
@@ -179,9 +186,18 @@ async function render(keepScroll) {
   const view = $("#view");
   const scroll = view.scrollHeight - view.scrollTop - view.clientHeight < 60;
   const builders = { overview: viewOverview, devices: viewDevices, device: viewDevice,
-                     rules: viewRules, ai: viewAI };
+                     rules: viewRules, scenes: viewScenes, ai: viewAI };
   (builders[S.route] || viewOverview)(view);
   if (keepScroll && scroll) view.scrollTop = view.scrollHeight;
+}
+
+function renderAlerts(alerts) {
+  if (!alerts.length) return `<div class="empty">暂无告警</div>`;
+  return alerts.map((a) => `
+    <div class="alert-item"><span class="alert-time">${fmtTime(a.ts)}</span>
+      <div><span class="alert-msg">${esc(a.message)}</span>${a.diagnosis
+        ? `<div class="muted" style="margin-top:2px">AI 诊断：${esc(a.diagnosis)}</div>` : ""}
+      </div></div>`).join("");
 }
 
 /* ------------------------------------------------------------------ 概览 */
@@ -219,10 +235,7 @@ async function viewOverview(view) {
     <div class="card">
       <div class="chart-card-head"><div class="chart-title">最近告警</div>
       <a class="back-link" href="#/rules">全部规则 →</a></div>
-      ${alerts.length ? alerts.map((a) => `
-        <div class="alert-item"><span class="alert-time">${fmtTime(a.ts)}</span>
-        <span class="alert-msg">${esc(a.message)}</span></div>`).join("")
-      : `<div class="empty">暂无告警</div>`}
+      ${renderAlerts(alerts)}
     </div>`;
   paintCharts();
 }
@@ -421,10 +434,7 @@ async function viewRules(view) {
     </div>
     <div class="card">
       <div class="chart-title mb14">告警历史</div>
-      ${alerts.length ? alerts.map((a) => `
-        <div class="alert-item"><span class="alert-time">${fmtTime(a.ts)}</span>
-        <span class="alert-msg">${esc(a.message)}</span></div>`).join("")
-      : `<div class="empty">暂无告警记录</div>`}
+      ${renderAlerts(alerts)}
     </div>`;
 
   $("#rule-form").addEventListener("submit", async (ev) => {
@@ -449,6 +459,100 @@ async function viewRules(view) {
     btn.addEventListener("click", async () => {
       await api(`/api/rules/${btn.dataset.delm}`, { method: "DELETE" });
       toast("规则已删除"); render();
+    }));
+}
+
+/* ------------------------------------------------------------------ 场景联动 */
+async function viewScenes(view) {
+  const [devices, scenes] = await Promise.all([
+    api("/api/devices"), api("/api/scenes"),
+  ]);
+  const nameOf = (id) => {
+    const d = devices.find((x) => x.id === id);
+    return d ? d.name : id;
+  };
+  const deviceOptions = (includeAny) =>
+    (includeAny ? [`<option value="">任意设备</option>`] : [])
+      .concat(devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}（${esc(d.id)}）</option>`))
+      .join("");
+  const fmtValue = (v) => (typeof v === "string" ? `"${v}"` : JSON.stringify(v));
+  const rows = scenes.map((s) => {
+    let actionValue;
+    try { actionValue = JSON.parse(s.action_value); } catch (e) { actionValue = s.action_value; }
+    return `
+    <tr>
+      <td class="mono">#${s.id}</td>
+      <td>${esc(s.name)}</td>
+      <td>${s.source_device_id ? esc(nameOf(s.source_device_id)) : "任意设备"}
+        · <span class="mono">${esc(s.metric)} ${esc(s.op)} ${s.threshold}</span></td>
+      <td>${esc(nameOf(s.action_device_id))}.
+        <span class="mono">${esc(s.action_property)} = ${esc(fmtValue(actionValue))}</span></td>
+      <td class="mono">${s.cooldown}s</td>
+      <td class="mono muted">${s.last_fired ? ago(s.last_fired) : "从未"}</td>
+      <td><button class="link" data-toggle="${s.id}" data-on="${s.enabled ? 1 : 0}">
+        ${s.enabled ? "已启用" : "已停用"}</button></td>
+      <td><button class="link" data-del="${s.id}" style="color:#e5484d">删除</button></td>
+    </tr>`;
+  }).join("");
+
+  view.innerHTML = `
+    <div class="page-title">场景联动</div>
+    <div class="page-sub">当 [设备指标满足条件] 则 [对另一设备执行动作]；冷却窗口防止命令震荡</div>
+    <div class="card mb14">
+      <form id="scene-form" class="form-grid">
+        <div class="form-item"><label>场景名称</label>
+          <input name="name" required placeholder="如 高温自动开灯"></div>
+        <div class="form-item"><label>触发设备</label><select name="source_device_id">${deviceOptions(true)}</select></div>
+        <div class="form-item"><label>触发指标</label><input name="metric" required placeholder="temperature"></div>
+        <div class="form-item"><label>条件</label><select name="op">
+          <option>&gt;</option><option>&gt;=</option><option>&lt;</option><option>&lt;=</option><option>==</option>
+        </select></div>
+        <div class="form-item"><label>阈值</label><input name="threshold" type="number" step="any" required placeholder="28"></div>
+        <div class="form-item"><label>执行设备</label><select name="action_device_id">${deviceOptions(false)}</select></div>
+        <div class="form-item"><label>动作属性</label><input name="action_property" required placeholder="power"></div>
+        <div class="form-item"><label>动作值</label><input name="action_value" required placeholder="true / 80 / off"></div>
+        <div class="form-item"><label>冷却（秒）</label><input name="cooldown" type="number" value="60" min="1"></div>
+        <button class="primary" type="submit">创建场景</button>
+      </form>
+    </div>
+    <div class="card">
+      ${scenes.length ? `<table>
+        <thead><tr><th>ID</th><th>名称</th><th>触发条件</th><th>执行动作</th>
+        <th>冷却</th><th>最近触发</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+      : `<div class="empty">还没有场景，例如：温度 &gt; 28 时打开智能灯-1</div>`}
+    </div>`;
+
+  $("#scene-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const raw = String(fd.get("action_value")).trim();
+    let value = raw;
+    if (raw === "true") value = true;
+    else if (raw === "false") value = false;
+    else if (raw !== "" && !isNaN(Number(raw))) value = Number(raw);
+    try {
+      await api("/api/scenes", { method: "POST", body: {
+        name: fd.get("name"),
+        source_device_id: fd.get("source_device_id") || null,
+        metric: fd.get("metric"), op: fd.get("op"), threshold: Number(fd.get("threshold")),
+        action_device_id: fd.get("action_device_id"),
+        action_property: fd.get("action_property"),
+        action_value: value, cooldown: Number(fd.get("cooldown")) || 60,
+      } });
+      toast("场景已创建"); render();
+    } catch (e) { toast(`创建失败：${e.message}`); }
+  });
+  view.querySelectorAll("[data-toggle]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      await api(`/api/scenes/${btn.dataset.toggle}`,
+        { method: "PATCH", body: { enabled: btn.dataset.on !== "1" } });
+      render();
+    }));
+  view.querySelectorAll("[data-del]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      await api(`/api/scenes/${btn.dataset.del}`, { method: "DELETE" });
+      toast("场景已删除"); render();
     }));
 }
 

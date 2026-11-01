@@ -134,8 +134,34 @@ PATCH 支持局部更新 `{"enabled": false}` / `{"threshold": 28}` / `{"note": 
 ```json
 [ { "id": 2, "rule_id": 1, "device_id": "sensor-1",
     "message": "设备 sensor-1 的 temperature = 31.2 > 30（高温）",
-    "level": "warning", "ts": 1793353000.1 } ]
+    "level": "warning", "ts": 1793353000.1,
+    "diagnosis": "传感器可能受热源干扰，建议检查安装位置并校准。" } ]
 ```
+
+- `level` 为 `warning`（阈值规则）或 `anomaly`（EWMA 统计异常检测）；
+- `diagnosis` 由 AI 助手异步生成（需配置 LLM Key），可能先为 `null` 稍后补全。
+
+## 场景联动
+
+### `POST /api/scenes`
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/scenes \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"高温自动开灯","metric":"temperature","op":">","threshold":28,
+       "action_device_id":"light-1","action_property":"power",
+       "action_value":true,"cooldown":60}'
+```
+
+- `source_device_id` 省略表示任意设备的该指标都触发；
+- `action_value` 为标量（bool/int/float/str）；
+- `cooldown`（秒）防止条件在阈值附近抖动导致命令来回震荡。
+
+### `GET /api/scenes` · `PATCH /api/scenes/{id}` · `DELETE /api/scenes/{id}`
+
+PATCH 支持 `{"enabled": false}` / `{"threshold": 26}` / `{"cooldown": 120}`。
+触发时通过 WebSocket 推送 `scene_fired` 事件；动作经命令通道下发，
+设备回报后闭环完成。
 
 规则触发时同步 `POST` 同样的 JSON 到 `LINIOT_WEBHOOK_URL`（若配置）。
 

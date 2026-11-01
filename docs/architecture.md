@@ -13,11 +13,14 @@
                         │   (线程池)            │    │
                         │                      ▼    ▼
                         │                 RuleEngine  事件: telemetry/device/
-                        │                   │         alert/command
+                        │              AnomalyDetector alert/command/scene_fired
+                        │                   │         /alert_diagnosis
                         │                   ▼
-                        │              SQLite Store ◀── AI 助手（读快照/写命令）
-                        │            devices/telemetry/      │
-                        │            rules/alerts/commands   ▼
+                        │              SceneEngine ──▶ set_properties（控制命令）
+                        │                   │
+                        │              SQLite Store ◀── AI 助手（读快照/写命令/诊断回写）
+                        │         devices/telemetry/rules/      │
+                        │         alerts/commands/scenes        ▼
                         │                          OpenAI 兼容 /chat/completions
                         └────────────────────────────────────────────────────┘
 ```
@@ -27,12 +30,14 @@
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | 存储 | `liniot/store.py` | SQLite 全部读写；单连接 + `RLock`，WAL 模式；遥测按设备环形保留 |
-| 设备服务 | `liniot/service.py` | 用例编排：注册、遥测入库、状态维护、命令下发；HTTP/MQTT 两通道汇聚于此 |
-| 规则引擎 | `liniot/rules.py` | 遥测到达时同步判定；按「(规则, 设备)」记录上升沿状态，避免重复告警 |
+| 设备服务 | `liniot/service.py` | 用例编排：注册、遥测入库、状态维护、命令下发；HTTP/MQTT 两通道汇聚点 |
+| 规则引擎 | `liniot/rules.py` | 遥测到达时同步判定阈值；按「(规则, 设备)」记录上升沿状态，避免重复告警 |
+| 异常检测 | `liniot/anomaly.py` | EWMA 基线 + 3σ 判定，无需配置即可发现指标突变，同样边沿去重 |
+| 场景引擎 | `liniot/scene.py` | 「当条件满足则执行动作」，冷却窗口防震荡；动作复用命令通道形成闭环 |
 | 事件总线 | `liniot/bus.py` | 进程内发布/订阅；`call_soon_threadsafe` 把 MQTT 线程的事件安全投递到 asyncio |
 | MQTT 接入 | `liniot/mqtt_service.py` | 订阅 `liniot/+/#` 上行主题；命令经 `liniot/{id}/command` 下发；断线自动重连 |
 | HTTP API | `liniot/api.py` | REST + WebSocket；`/api/*` 语义与 MQTT 通道一致 |
-| AI 助手 | `liniot/ai.py` | 组装设备快照 → LLM 结构化输出 → 白名单校验 → 命令落库；无 Key 走本地意图 |
+| AI 助手 | `liniot/ai.py` | 对话查询/控制（快照注入 + 白名单校验），以及告警的异步 LLM 诊断回写 |
 | 仪表盘 | `web/` | 原生 JS 单页，hash 路由；Canvas 图表零依赖 |
 | 模拟器 | `liniot/simulator.py` | 虚拟传感器（随机游走）与智能灯（轮询命令并回报），无需硬件 |
 
@@ -57,6 +62,14 @@ HTTP 与 MQTT 上报最终都调用 `DeviceService.ingest()` / `set_status()`，
 规则在数据到达时同步判定。触发态以 `(rule_id, device_id)` 为键保存在内存：
 条件持续为真只告警一次，恢复后再次越限才重新告警。全局规则（`device_id` 为空）
 对每台设备独立做边沿判定，互不干扰（tests/test_rules.py 有专门回归用例）。
+异常检测与场景引擎沿用同一语义：持续异常不重复告警，场景动作受冷却窗口约束。
+
+### 智能处理管线
+
+每批遥测在 `DeviceService.ingest` 中依次经过：入库 → 规则判定 → 异常检测 →
+场景联动，全部同步完成（微秒级）；LLM 诊断是唯一的异步环节——`main.py` 的
+`diagnosis_worker` 协程监听告警事件，调 LLM 生成原因分析后回写
+`alerts.diagnosis` 并广播 `alert_diagnosis` 事件，失败静默降级，不阻塞数据面。
 
 ### 数据保留
 
