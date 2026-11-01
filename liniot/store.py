@@ -48,9 +48,25 @@ CREATE TABLE IF NOT EXISTS alerts (
     device_id TEXT,
     message   TEXT NOT NULL,
     level     TEXT NOT NULL DEFAULT 'warning',
-    ts        REAL NOT NULL
+    ts        REAL NOT NULL,
+    diagnosis TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
+CREATE TABLE IF NOT EXISTS scenes (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    source_device_id TEXT,
+    metric           TEXT NOT NULL,
+    op               TEXT NOT NULL,
+    threshold        REAL NOT NULL,
+    action_device_id TEXT NOT NULL,
+    action_property  TEXT NOT NULL,
+    action_value     TEXT NOT NULL,
+    cooldown         INTEGER NOT NULL DEFAULT 60,
+    last_fired       REAL NOT NULL DEFAULT 0,
+    created_at       REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS commands (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     device_id   TEXT NOT NULL,
@@ -85,6 +101,10 @@ class Store:
         with self.lock:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.executescript(SCHEMA)
+            # 旧库迁移：v0.1 的 alerts 表没有 diagnosis 列
+            columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(alerts)")}
+            if "diagnosis" not in columns:
+                self.conn.execute("ALTER TABLE alerts ADD COLUMN diagnosis TEXT")
             self.conn.commit()
 
     # ------------------------------------------------------------------ 设备
@@ -288,6 +308,65 @@ class Store:
                 "SELECT * FROM alerts ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def set_alert_diagnosis(self, alert_id: int, diagnosis: str) -> None:
+        with self.lock:
+            self.conn.execute("UPDATE alerts SET diagnosis=? WHERE id=?",
+                              (diagnosis, alert_id))
+            self.conn.commit()
+
+    # ------------------------------------------------------------------ 场景
+
+    def create_scene(self, name: str, source_device_id: Optional[str], metric: str,
+                     op: str, threshold: float, action_device_id: str,
+                     action_property: str, action_value: str,
+                     cooldown: int = 60) -> dict[str, Any]:
+        with self.lock:
+            cur = self.conn.execute(
+                "INSERT INTO scenes(name,enabled,source_device_id,metric,op,threshold,"
+                "action_device_id,action_property,action_value,cooldown,created_at)"
+                " VALUES(?,1,?,?,?,?,?,?,?,?,?)",
+                (name, source_device_id, metric, op, threshold,
+                 action_device_id, action_property, action_value, cooldown, time.time()),
+            )
+            self.conn.commit()
+            return self.get_scene(cur.lastrowid)  # type: ignore[return-value]
+
+    def get_scene(self, scene_id: int) -> Optional[dict[str, Any]]:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_scenes(self, only_enabled: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM scenes" + (" WHERE enabled=1" if only_enabled else "") + " ORDER BY id"
+        with self.lock:
+            rows = self.conn.execute(sql).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_scene(self, scene_id: int, **changes: Any) -> Optional[dict[str, Any]]:
+        allowed = {"enabled", "name", "threshold", "cooldown"}
+        sets, params = [], []
+        for key, value in changes.items():
+            if key in allowed and value is not None:
+                sets.append(f"{key}=?")
+                params.append(value if not isinstance(value, bool) else int(value))
+        if not sets:
+            return self.get_scene(scene_id)
+        with self.lock:
+            self.conn.execute(f"UPDATE scenes SET {', '.join(sets)} WHERE id=?",
+                              (*params, scene_id))
+            self.conn.commit()
+        return self.get_scene(scene_id)
+
+    def delete_scene(self, scene_id: int) -> None:
+        with self.lock:
+            self.conn.execute("DELETE FROM scenes WHERE id=?", (scene_id,))
+            self.conn.commit()
+
+    def touch_scene(self, scene_id: int, ts: float) -> None:
+        with self.lock:
+            self.conn.execute("UPDATE scenes SET last_fired=? WHERE id=?", (ts, scene_id))
+            self.conn.commit()
 
     def count_alerts_since(self, since: float) -> int:
         with self.lock:

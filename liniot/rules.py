@@ -18,6 +18,16 @@ OPS: dict[str, Callable[[float, float], bool]] = {
 }
 
 
+def notify_webhook(url: str, payload: dict[str, Any]) -> None:
+    """告警 Webhook 回调；网络异常只记日志，不影响主流程。"""
+    if not url:
+        return
+    try:
+        httpx.post(url, json=payload, timeout=3)
+    except Exception as exc:
+        logger.warning("告警 Webhook 调用失败: %s", exc)
+
+
 class RuleEngine:
     def __init__(self, store, bus, webhook_url: str = "") -> None:
         self.store = store
@@ -58,16 +68,12 @@ class RuleEngine:
                    + (f"（{rule['note']}）" if rule["note"] else ""))
         alert_id = self.store.insert_alert(rule["id"], device_id, message)
         alert = {"id": alert_id, "rule_id": rule["id"], "device_id": device_id,
-                 "message": message, "level": "warning", "ts": time.time()}
+                 "message": message, "level": "warning", "ts": time.time(),
+                 "diagnosis": None}
         self.bus.publish({"type": "alert", "data": alert})
-        self._notify_webhook(alert)
+        notify_webhook(self.webhook_url, alert)
         logger.warning("规则触发: %s", message)
         return alert
 
-    def _notify_webhook(self, alert: dict[str, Any]) -> None:
-        if not self.webhook_url:
-            return
-        try:
-            httpx.post(self.webhook_url, json=alert, timeout=3)
-        except Exception as exc:  # 网络/目标服务异常不应影响主流程
-            logger.warning("告警 Webhook 调用失败: %s", exc)
+    def _notify_webhook(self, alert: dict[str, Any]) -> None:  # 兼容保留
+        notify_webhook(self.webhook_url, alert)

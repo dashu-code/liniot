@@ -71,3 +71,19 @@ def test_overview(service):
     assert overview["devices"] == 1
     assert overview["online"] == 1
     assert overview["telemetry_points"] == 1
+    assert overview["rules"] == 0
+
+
+def test_ingest_runs_anomaly_detection(tmp_path):
+    store = Store(tmp_path / "an.db")
+    service = DeviceService(store, EventBus(), RuleEngine(store, EventBus()))
+    service.register("传感器", "sensor", device_id="sensor-1")
+    normal = [22.0, 22.2, 21.8, 22.1, 21.9, 22.3, 21.7, 22.0, 22.2, 21.8, 22.1]
+    for value in normal:
+        service.ingest("sensor-1", [{"metric": "temperature", "value": value}])
+    service.ingest("sensor-1", [{"metric": "temperature", "value": 45.0}])
+
+    alerts = store.list_alerts()
+    anomaly = [a for a in alerts if a["level"] == "anomaly"]
+    assert len(anomaly) == 1
+    assert "45" in anomaly[0]["message"] and "σ" in anomaly[0]["message"]
