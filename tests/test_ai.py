@@ -5,7 +5,7 @@ import pytest
 
 from liniot.ai import extract_json, local_intent
 from liniot.bus import EventBus
-from liniot.config import AIConfig
+from liniot.config import AIConfig, Config
 from liniot.rules import RuleEngine
 from liniot.service import DeviceService
 from liniot.store import Store
@@ -95,3 +95,66 @@ async def test_chat_without_key_uses_local_mode(service):
     result = await ai.chat(service.store, service, AIConfig(), "关闭智能灯")
     assert result["mode"] == "local"
     assert service.poll_commands("light-1")[0]["payload"]["value"] is False
+
+
+# ---------------------------------------------------------------- 告警诊断
+
+@pytest.mark.anyio()
+async def test_diagnose_alert_with_llm(service, monkeypatch):
+    from liniot import ai
+
+    async def fake_llm(config, messages):
+        assert "设备" in messages[0]["content"]
+        return "传感器可能受热源干扰导致读数升高，建议检查安装位置并重新校准。"
+
+    monkeypatch.setattr(ai, "call_llm", fake_llm)
+    alert = {"id": 1, "device_id": "sensor-1", "message": "设备 sensor-1 的 temperature = 45 > 30"}
+    text = await ai.diagnose_alert(service.store, service, AIConfig(api_key="k"), alert)
+    assert "校准" in text
+
+
+@pytest.mark.anyio()
+async def test_diagnose_alert_without_key_returns_none(service):
+    from liniot import ai
+
+    alert = {"id": 1, "device_id": "sensor-1", "message": "x"}
+    assert await ai.diagnose_alert(service.store, service, AIConfig(), alert) is None
+
+
+@pytest.mark.anyio()
+async def test_diagnose_alert_llm_failure_is_silent(service, monkeypatch):
+    from liniot import ai
+
+    async def broken_llm(config, messages):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(ai, "call_llm", broken_llm)
+    alert = {"id": 1, "device_id": "sensor-1", "message": "x"}
+    assert await ai.diagnose_alert(service.store, service, AIConfig(api_key="k"), alert) is None
+
+
+@pytest.mark.anyio()
+async def test_diagnosis_worker_persists_and_broadcasts(service, monkeypatch):
+    import asyncio
+
+    from liniot import ai, main as liniot_main
+
+    async def fake_llm(config, messages):
+        return "建议检查传感器安装位置。"
+
+    monkeypatch.setattr(ai, "call_llm", fake_llm)
+    bus = EventBus()
+    alert_id = service.store.insert_alert(None, "sensor-1", "测试告警")
+
+    config = Config()
+    config.ai = AIConfig(api_key="k")
+    bus.attach_loop(asyncio.get_running_loop())
+    worker = asyncio.create_task(
+        liniot_main.diagnosis_worker(service.store, service, config, bus))
+    await asyncio.sleep(0.05)
+    bus.publish({"type": "alert", "data": {"id": alert_id, "device_id": "sensor-1",
+                                           "message": "测试告警", "diagnosis": None}})
+    await asyncio.sleep(0.2)
+    worker.cancel()
+    row = [a for a in service.store.list_alerts() if a["id"] == alert_id][0]
+    assert row["diagnosis"] == "建议检查传感器安装位置。"

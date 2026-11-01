@@ -35,6 +35,17 @@ SYSTEM_PROMPT = """你是 LinIoT 物联网平台的智能助手，帮助用户�
 4. 必须只输出一个 JSON 对象，不要输出 markdown 代码块或其他内容，格式：
    {{"reply": "给用户的简洁中文回答", "actions": []}}"""
 
+DIAGNOSIS_PROMPT = """你是 LinIoT 物联网平台的告警诊断助手。
+
+告警涉及设备的实时快照（JSON）：
+{snapshot}
+
+刚触发的告警：
+{alert}
+
+请用不超过三句中文，先分析可能原因，再给一条具体处置建议。
+只输出纯文本，不要 JSON、不要标题、不要表情符号。"""
+
 HELP_TEXT = ("我可以帮你查询设备数据和下发控制命令，例如：\n"
              "· 客厅温度是多少？\n"
              "· 打开所有灯 / 关闭智能灯-1\n"
@@ -65,6 +76,25 @@ async def call_llm(config: AIConfig, messages: list[dict[str, str]]) -> str:
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
+
+
+async def diagnose_alert(store, service, config: AIConfig,
+                         alert: dict[str, Any]) -> str | None:
+    """对单条告警生成原因分析与处置建议；失败返回 None（静默降级）。"""
+    if not config.enabled:
+        return None
+    device_id = alert.get("device_id")
+    snapshot = [d for d in build_snapshot(store, service) if d["id"] == device_id]
+    messages = [{"role": "system",
+                 "content": DIAGNOSIS_PROMPT.format(
+                     snapshot=json.dumps(snapshot, ensure_ascii=False),
+                     alert=alert.get("message", ""))}]
+    try:
+        text = await call_llm(config, messages)
+        return (text or "").strip()[:500] or None
+    except Exception as exc:
+        logger.warning("告警诊断生成失败: %s", exc)
+        return None
 
 
 def extract_json(text: str) -> dict[str, Any] | None:

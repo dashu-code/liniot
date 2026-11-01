@@ -31,6 +31,7 @@ class AIConfig:
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4o-mini"
     timeout: float = 25.0
+    diagnosis: bool = True   # 告警后自动生成 LLM 诊断（需启用大模型）
 
     @property
     def enabled(self) -> bool:
@@ -69,6 +70,7 @@ def load_config() -> Config:
             api_key=env.get("LINIOT_AI_API_KEY", ""),
             base_url=env.get("LINIOT_AI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
             model=env.get("LINIOT_AI_MODEL", "gpt-4o-mini"),
+            diagnosis=env.get("LINIOT_AI_DIAGNOSIS", "on").lower() not in ("off", "0", "false"),
         ),
         web_dir=Path(env.get("LINIOT_WEB_DIR", web_default)),
     )
