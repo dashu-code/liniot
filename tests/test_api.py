@@ -96,6 +96,41 @@ def test_ai_chat_endpoint_local_mode(client):
     assert client.get("/api/devices/light-1/commands").json()[0]["payload"]["value"] is True
 
 
+def test_scenes_crud_and_trigger(client):
+    client.post("/api/devices", json={"id": "sensor-1", "name": "s", "type": "sensor"})
+    client.post("/api/devices", json={"id": "light-1", "name": "灯", "type": "light"})
+    client.post("/api/devices/light-1/status",
+                json={"status": "online", "properties": {"power": False}})
+
+    scene = client.post("/api/scenes", json={
+        "name": "高温开灯", "metric": "temperature", "op": ">", "threshold": 28,
+        "action_device_id": "light-1", "action_property": "power",
+        "action_value": True, "cooldown": 60}).json()
+    assert scene["id"] > 0 and scene["enabled"] == 1
+
+    client.post("/api/devices/sensor-1/telemetry",
+                json={"metric": "temperature", "value": 30})
+    commands = client.get("/api/devices/light-1/commands").json()
+    assert commands[0]["payload"] == {"property": "power", "value": True}
+
+    # 冷却窗口内不重复下发
+    client.post("/api/devices/sensor-1/telemetry",
+                json={"metric": "temperature", "value": 31})
+    assert client.get("/api/devices/light-1/commands").json() == []
+
+    assert client.patch(f"/api/scenes/{scene['id']}",
+                        json={"enabled": False}).json()["enabled"] == 0
+    assert client.delete(f"/api/scenes/{scene['id']}").status_code == 200
+    assert client.get("/api/scenes").json() == []
+
+
+def test_scene_rejects_unknown_devices(client):
+    resp = client.post("/api/scenes", json={
+        "name": "x", "metric": "temperature", "op": ">", "threshold": 1,
+        "action_device_id": "ghost", "action_property": "power", "action_value": True})
+    assert resp.status_code == 404
+
+
 def test_validation_errors(client):
     assert client.post("/api/devices", json={"name": "", "type": "x"}).status_code == 422
     assert client.post("/api/devices", json={"id": "非法ID", "name": "x"}).status_code == 422

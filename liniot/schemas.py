@@ -54,6 +54,25 @@ class RulePatch(BaseModel):
     threshold: Optional[float] = None
 
 
+class SceneIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    source_device_id: Optional[str] = None  # 为空时任意设备的该指标都触发
+    metric: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,32}$")
+    op: Literal[">", ">=", "<", "<=", "=="]
+    threshold: float
+    action_device_id: str
+    action_property: str = Field(min_length=1, max_length=32)
+    action_value: PropertyValue
+    cooldown: int = Field(default=60, ge=1, le=86400)
+
+
+class ScenePatch(BaseModel):
+    enabled: Optional[bool] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    threshold: Optional[float] = None
+    cooldown: Optional[int] = Field(default=None, ge=1, le=86400)
+
+
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=500)
     history: Optional[list[dict[str, str]]] = None

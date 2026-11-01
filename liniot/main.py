@@ -9,11 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from . import ai
 from .api import build_router, register_websocket
 from .bus import EventBus
 from .config import Config, load_config
 from .mqtt_service import MQTTService
 from .rules import RuleEngine
+from .scene import SceneEngine
 from .service import DeviceService
 from .store import Store
 
@@ -27,20 +29,43 @@ DESCRIPTION = """LinIoT — 轻量级 AIoT 开源平台。
 """
 
 
+async def diagnosis_worker(store, devices, config: Config, bus: EventBus) -> None:
+    """监听告警事件，异步生成 LLM 诊断并回写；配置 Key 后自动启用。"""
+    queue = bus.subscribe()
+    while True:
+        message = await queue.get()
+        if message.get("type") != "alert":
+            continue
+        alert = message["data"]
+        if alert.get("diagnosis"):
+            continue
+        text = await ai.diagnose_alert(store, devices, config.ai, alert)
+        if text:
+            store.set_alert_diagnosis(alert["id"], text)
+            bus.publish({"type": "alert_diagnosis",
+                         "data": {"id": alert["id"], "diagnosis": text}})
+
+
 def create_app(config: Config | None = None) -> FastAPI:
     config = config or load_config()
     store = Store(config.db_path)
     bus = EventBus()
     rules = RuleEngine(store, bus, config.webhook_url)
     mqtt = MQTTService(config.mqtt, service=None)
-    devices = DeviceService(store, bus, rules, mqtt, config.online_timeout)
+    devices = DeviceService(store, bus, rules, mqtt, config.online_timeout,
+                            config.webhook_url)
     mqtt.service = devices
+    devices.scene_engine = SceneEngine(store, devices)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         bus.attach_loop(asyncio.get_running_loop())
         mqtt.start()
+        worker = (asyncio.create_task(diagnosis_worker(store, devices, config, bus))
+                  if config.ai.diagnosis else None)
         yield
+        if worker is not None:
+            worker.cancel()
         mqtt.stop()
 
     app = FastAPI(title="LinIoT", version=__version__, description=DESCRIPTION,

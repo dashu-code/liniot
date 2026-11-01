@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisc
 from . import ai
 from .config import Config
 from .schemas import (ChatIn, DeviceIn, PropertiesIn, RuleIn, RulePatch,
-                      StatusIn, TelemetryIn)
+                      SceneIn, ScenePatch, StatusIn, TelemetryIn)
 from .service import DeviceService, UnknownDevice
 
 logger = logging.getLogger("liniot.api")
@@ -141,6 +141,35 @@ def build_router(store, bus, rules, devices: DeviceService, config: Config) -> A
     @router.get("/alerts")
     def list_alerts(limit: int = 50) -> list[dict[str, Any]]:
         return store.list_alerts(max(1, min(limit, 500)))
+
+    # ------------------------------------------------------------------ 场景
+
+    @router.get("/scenes")
+    def list_scenes() -> list[dict[str, Any]]:
+        return store.list_scenes()
+
+    @router.post("/scenes", status_code=201)
+    def create_scene(body: SceneIn) -> dict[str, Any]:
+        if body.source_device_id is not None:
+            device_or_404(body.source_device_id)
+        device_or_404(body.action_device_id)
+        return store.create_scene(
+            body.name, body.source_device_id, body.metric, body.op,
+            body.threshold, body.action_device_id, body.action_property,
+            json.dumps(body.action_value, ensure_ascii=False), body.cooldown)
+
+    @router.patch("/scenes/{scene_id}")
+    def patch_scene(scene_id: int, body: ScenePatch) -> dict[str, Any]:
+        scene = store.update_scene(scene_id, enabled=body.enabled, name=body.name,
+                                   threshold=body.threshold, cooldown=body.cooldown)
+        if scene is None:
+            raise HTTPException(404, f"场景不存在: {scene_id}")
+        return scene
+
+    @router.delete("/scenes/{scene_id}")
+    def delete_scene(scene_id: int) -> dict[str, Any]:
+        store.delete_scene(scene_id)
+        return {"deleted": scene_id}
 
     # ------------------------------------------------------------------ AI
 
