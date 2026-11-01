@@ -133,6 +133,7 @@ docker compose up -d    # 同时启动 mosquitto + liniot，MQTT 通道自动接
 
 欢迎任何人参与，Issue / PR 均可：
 
+- **第一次贡献？** 看[你的第一个 PR：十分钟上手指南](docs/first-pr.md)——无需硬件，照着命令走即可；
 - **想上手写代码**：从 [ROADMAP](ROADMAP.md) 挑一个 *good first issue*，按 [CONTRIBUTING](CONTRIBUTING.md) 的流程提交 PR；
 - **想提需求/报 Bug**：使用 [Issue 模板](.github/ISSUE_TEMPLATE)；
 - 所有参与者请遵守[行为准则](CODE_OF_CONDUCT.md)。
