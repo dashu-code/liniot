@@ -20,9 +20,7 @@ function cssVar(n,d){ try { var v=getComputedStyle(document.documentElement).get
     btn.addEventListener('click',function(){
       t=(t==='dark'?'light':'dark');
       applyTheme(t);
-      var redrawn=false;
-      try{ if(typeof drawChart==='function'){ drawChart(); redrawn=true; } }catch(e){}
-      if(!redrawn){ try{ location.reload(); }catch(e){} }
+      try{ if(typeof render==='function'){ render(true); } else { throw 0; } }catch(e){ try{ location.reload(); }catch(e2){} }
     });
   }
 })();
@@ -118,7 +116,7 @@ function drawChart(canvas, points, color) {
   const x = (i) => padL + (iw * i) / (points.length - 1);
   const y = (v) => padT + ih - ((v - min) * ih) / (max - min);
 
-  ctx.strokeStyle = "#e8eef7"; ctx.fillStyle = cssVar('--muted', '#8a99b5'); ctx.font = "10px ui-monospace, Menlo";
+  ctx.strokeStyle = cssVar("--border", "#e8eef7"); ctx.fillStyle = cssVar('--muted', '#8a99b5'); ctx.font = "10px ui-monospace, Menlo";
   ctx.textAlign = "right";
   for (let g = 0; g <= 3; g++) {
     const gy = padT + (ih * g) / 3;
@@ -211,9 +209,27 @@ window.addEventListener("hashchange", parseHash);
 async function render(keepScroll) {
   const view = $("#view");
   const scroll = view.scrollHeight - view.scrollTop - view.clientHeight < 60;
+  // 重绘前记录焦点与输入状态：WS 推送触发的重建不能吞掉用户正在输入的内容
+  const active = document.activeElement;
+  let snap = null;
+  if (active && view.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+    const fields = [...view.querySelectorAll("input, textarea, select")];
+    snap = { idx: fields.indexOf(active), value: active.value,
+             ss: active.selectionStart, se: active.selectionEnd };
+  }
   const builders = { overview: viewOverview, devices: viewDevices, device: viewDevice,
                      rules: viewRules, scenes: viewScenes, ai: viewAI };
   (builders[S.route] || viewOverview)(view);
+  // 重绘后恢复焦点与输入内容（只碰输入控件，不改变渲染结果）
+  if (snap) {
+    const fields = [...view.querySelectorAll("input, textarea, select")];
+    const el = fields[snap.idx];
+    if (el) {
+      if (snap.value !== null) el.value = snap.value;
+      el.focus();
+      try { el.setSelectionRange(snap.ss, snap.se); } catch (e) {}
+    }
+  }
   if (keepScroll && scroll) view.scrollTop = view.scrollHeight;
 }
 
